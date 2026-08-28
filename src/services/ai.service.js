@@ -307,7 +307,8 @@ function matchSingle(command) {
     if (
         /\bvolume\b/.test(lower) ||
         /\b(louder|quieter)\b/.test(lower) ||
-        /\bmute\b/.test(lower)
+        /\bmute\b/.test(lower) ||
+        /\bunmute\b/.test(lower)
     ) {
 
         if (/\bmute\b/.test(lower) && !/\bunmute\b/.test(lower)) {
