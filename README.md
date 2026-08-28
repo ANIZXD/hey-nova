@@ -103,6 +103,8 @@ Returns the browser action, for example:
 | "go back" / "go forward"         | Previous / next page                |
 | "reload the page"                | Refreshes the tab                   |
 | "scroll down" / "scroll up"      | Scrolls the current page            |
+| "open reels"                     | Opens Instagram Reels               |
+| "next" / "previous"              | Next/prev on Shorts, Reels, TikTok… |
 | "volume up" / "volume down"      | Turns the playing video/audio up/down |
 | "set volume to half"             | Sets volume to 50%                  |
 | "volume 30 percent"              | Sets volume to 30%                  |

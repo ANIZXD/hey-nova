@@ -83,6 +83,7 @@ Examples:
 "what is the weather in london" -> [{"action":"SEARCH","query":"what is the weather in london"}]
 "google hello world html" -> [{"action":"SEARCH","query":"hello world html"}]
 "open youtube and search cats" -> [{"action":"OPEN_URL","url":"https://www.youtube.com"},{"action":"SEARCH","query":"cats","engine":"youtube"}]
+"open reels" -> [{"action":"OPEN_URL","url":"https://www.instagram.com/reels/"}]
 "go back" -> [{"action":"GO_BACK"}]
 "go forward" -> [{"action":"GO_FORWARD"}]
 "reload the page" -> [{"action":"RELOAD"}]
@@ -207,6 +208,10 @@ const COMMON_SITES = {
 
     // TikTok
     tiktok: "https://www.tiktok.com",
+
+    // Instagram Reels
+    reels: "https://www.instagram.com/reels/",
+    reel: "https://www.instagram.com/reels/",
     tt: "https://www.tiktok.com",
 
     // Twitch
