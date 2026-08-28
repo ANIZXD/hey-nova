@@ -27,9 +27,11 @@ Supported actions - use exactly these:
    Opens a new blank tab.
 
 4. {"action":"CLOSE_TAB","target":"youtube"}
-   Closes the tab for a named site. target is the site name
-   ("youtube", "google", "chatgpt", ...). Without target, closes
-   the current tab.
+   Closes a tab. Use "target" for a known site ("youtube",
+   "google", ...) or "title" for the name of a song/app found
+   in the tab title ("close bairan" -> title:"bairan").
+   Without target/title, closes the current tab.
+   Include "all":true only for "close all youtube".
 
 5. {"action":"GO_BACK"}
    Goes back one page in the current tab.
@@ -52,6 +54,8 @@ Supported actions - use exactly these:
    ("half" -> 0.5, "max"/"full" -> 1, "30 percent" -> 0.3).
    For "up"/"down", "step" is optional (0.1 default;
    0.5 for "by half").
+   Include "tab" with the song/app name to target that specific
+   tab by its title ("mute bairan" -> tab:"bairan").
 
 10. {"action":"PLAY_PAUSE","mode":"pause"}
     Controls the video/audio playing in the current tab.
@@ -97,6 +101,9 @@ Examples:
 "resume the video" -> [{"action":"PLAY_PAUSE","mode":"play"}]
 "play" -> [{"action":"PLAY_PAUSE","mode":"play"}]
 "close youtube" -> [{"action":"CLOSE_TAB","target":"youtube"}]
+"close all youtube" -> [{"action":"CLOSE_TAB","target":"youtube","all":true}]
+"close bairan" -> [{"action":"CLOSE_TAB","title":"bairan"}]
+"mute bairan" -> [{"action":"VOLUME","mode":"mute","tab":"bairan"}]
 "close the tab" -> [{"action":"CLOSE_TAB"}]
 "close the browser" -> [{"action":"CLOSE_BROWSER"}]
 "new tab" -> [{"action":"NEW_TAB"}]
@@ -268,12 +275,23 @@ function matchSingle(command) {
             return { action: "CLOSE_BROWSER" };
         }
 
-        if (/\bclose (the|this|that|current|open)?\s*tab\b/.test(lower)) {
-            return { action: "CLOSE_TAB" };
+        // "close the tab" / "close this" -> the current tab
+        if (
+            /\bclose (the|this|that|current|active|open)?\s*tab\b/.test(lower) ||
+            /\bclose (this|the|current|active)\b/.test(lower)
+        ) {
+            return { action: "CLOSE_TAB", active: true };
         }
+
+        const allFlag =
+            /\bclose all\b/.test(lower) ||
+            /\bclose every\b/.test(lower) ||
+            /\ball the\b/.test(lower);
 
         const closeName = trimmed
             .replace(/^close\b/, "")
+            .replace(/^all\b/, "")
+            .replace(/^every\b/, "")
             .replace(/^(the|that|this|my)\s+/i, "")
             .trim();
 
@@ -284,13 +302,15 @@ function matchSingle(command) {
                     new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
                         .test(" " + closeName + " ")
                 ) {
-                    return { action: "CLOSE_TAB", target: name };
+                    return { action: "CLOSE_TAB", target: name, all: allFlag };
                 }
             }
             const dom = closeName.match(/^([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/);
             if (dom) {
-                return { action: "CLOSE_TAB", url: "https://" + dom[1].toLowerCase() };
+                return { action: "CLOSE_TAB", url: "https://" + dom[1].toLowerCase(), all: allFlag };
             }
+            // Anything else -> the name of the song/app in that tab
+            return { action: "CLOSE_TAB", title: closeName, all: allFlag };
         }
     }
 
@@ -326,12 +346,29 @@ function matchSingle(command) {
         /\bunmute\b/.test(lower)
     ) {
 
+        // "mute bairan" -> target that specific tab by name
+        const muteNameMatch = trimmed.match(
+            /^(?:mute|unmute)\s+(?:the\s+)?(.+)$/i
+        );
+
+        const tabName = muteNameMatch
+            ? muteNameMatch[1]
+                .replace(/\b(video|song|audio|music|track|sound|now|please|this|that|tab)\b/gi, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase()
+            : "";
+
         if (/\bmute\b/.test(lower) && !/\bunmute\b/.test(lower)) {
-            return { action: "VOLUME", mode: "mute" };
+            return tabName
+                ? { action: "VOLUME", mode: "mute", tab: tabName }
+                : { action: "VOLUME", mode: "mute" };
         }
 
         if (/\bunmute\b/.test(lower)) {
-            return { action: "VOLUME", mode: "unmute" };
+            return tabName
+                ? { action: "VOLUME", mode: "unmute", tab: tabName }
+                : { action: "VOLUME", mode: "unmute" };
         }
 
         const up =

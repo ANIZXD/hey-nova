@@ -110,7 +110,9 @@ Returns the browser action, for example:
 | "volume 30 percent"              | Sets volume to 30%                  |
 | "mute" / "unmute"                | Mutes / unmutes the tab             |
 | "close the tab"                  | Closes the current tab              |
-| "close youtube"                  | Closes the YouTube tab(s)           |
+| "close youtube"                  | Closes the most relevant YouTube tab |
+| "close all youtube"              | Closes every YouTube tab            |
+| "close bairan" / "mute bairan"   | Targets the tab that's playing it   |
 | "close the browser"              | Closes the whole browser (all windows) |
 | "new tab"                        | Opens a new blank tab               |
 | "pause the video"                | Pauses the playing video/audio     |
