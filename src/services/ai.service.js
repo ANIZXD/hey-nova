@@ -26,8 +26,10 @@ Supported actions - use exactly these:
 3. {"action":"NEW_TAB"}
    Opens a new blank tab.
 
-4. {"action":"CLOSE_TAB"}
-   Closes the current tab.
+4. {"action":"CLOSE_TAB","target":"youtube"}
+   Closes the tab for a named site. target is the site name
+   ("youtube", "google", "chatgpt", ...). Without target, closes
+   the current tab.
 
 5. {"action":"GO_BACK"}
    Goes back one page in the current tab.
@@ -50,6 +52,11 @@ Supported actions - use exactly these:
    ("half" -> 0.5, "max"/"full" -> 1, "30 percent" -> 0.3).
    For "up"/"down", "step" is optional (0.1 default;
    0.5 for "by half").
+
+10. {"action":"PLAY_PAUSE","mode":"pause"}
+    Controls the video/audio playing in the current tab.
+    mode is "pause" or "play". A bare "play" (no song name)
+    means "play".
 
 Rules:
 - Return ONLY the raw JSON array. No markdown, no code
@@ -81,6 +88,10 @@ Examples:
 "set volume to 30 percent" -> [{"action":"VOLUME","mode":"set","value":0.3}]
 "maximize the volume" -> [{"action":"VOLUME","mode":"set","value":1}]
 "mute the tab" -> [{"action":"VOLUME","mode":"mute"}]
+"pause the video" -> [{"action":"PLAY_PAUSE","mode":"pause"}]
+"resume the video" -> [{"action":"PLAY_PAUSE","mode":"play"}]
+"play" -> [{"action":"PLAY_PAUSE","mode":"play"}]
+"close youtube" -> [{"action":"CLOSE_TAB","target":"youtube"}]
 "close the tab" -> [{"action":"CLOSE_TAB"}]
 "new tab" -> [{"action":"NEW_TAB"}]
 `;
@@ -237,7 +248,53 @@ function matchSingle(command) {
 
     // Navigation / tab actions
     if (/\bnew tab\b/.test(lower)) return { action: "NEW_TAB" };
-    if (/\bclose (the )?tab\b/.test(lower)) return { action: "CLOSE_TAB" };
+
+    // CLOSE - "close the tab" closes the last real tab; naming a
+    // site ("close youtube") closes that site's tab(s).
+    if (/\bclose\b/.test(lower)) {
+
+        if (/\bclose (the|this|that|current|open)?\s*tab\b/.test(lower)) {
+            return { action: "CLOSE_TAB" };
+        }
+
+        const closeName = trimmed
+            .replace(/^close\b/, "")
+            .replace(/^(the|that|this|my)\s+/i, "")
+            .trim();
+
+        if (closeName) {
+            for (const name in COMMON_SITES) {
+                if (/^\d+$/.test(name)) continue;
+                if (
+                    new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+                        .test(" " + closeName + " ")
+                ) {
+                    return { action: "CLOSE_TAB", target: name };
+                }
+            }
+            const dom = closeName.match(/^([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/);
+            if (dom) {
+                return { action: "CLOSE_TAB", url: "https://" + dom[1].toLowerCase() };
+            }
+        }
+    }
+
+    // PLAY/PAUSE - control the video playing in the current tab
+    if (/\b(pause|freeze|hold)\b/.test(lower)) {
+        return { action: "PLAY_PAUSE", mode: "pause" };
+    }
+    if (
+        /\b(resume|unpause|continue playing|keep playing)\b/.test(lower) ||
+        /\bplay the (video|song|audio|music)\b/.test(lower)
+    ) {
+        return { action: "PLAY_PAUSE", mode: "play" };
+    }
+    if (
+        /(^|\b)play(\s|$)/i.test(trimmed) &&
+        !/\s+play\s+(\S)/.test(lower)
+    ) {
+        return { action: "PLAY_PAUSE", mode: "play" };
+    }
     if (/\bgo back\b/.test(lower) || /\bback(page|wards)?\b/.test(lower)) return { action: "GO_BACK" };
     if (/\bgo forward\b/.test(lower) || /\bforward\b/.test(lower)) return { action: "GO_FORWARD" };
     if (/\breload\b/.test(lower) || /\brefresh\b/.test(lower)) return { action: "RELOAD" };

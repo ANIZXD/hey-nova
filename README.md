@@ -108,7 +108,10 @@ Returns the browser action, for example:
 | "volume 30 percent"              | Sets volume to 30%                  |
 | "mute" / "unmute"                | Mutes / unmutes the tab             |
 | "close the tab"                  | Closes the current tab              |
+| "close youtube"                  | Closes the YouTube tab(s)           |
 | "new tab"                        | Opens a new blank tab               |
+| "pause the video"                | Pauses the playing video/audio     |
+| "play the video" / "resume"      | Resumes it                          |
 | anything else                    | Falls back to a Google search       |
 
 If the backend is not running, the extension still handles common commands
