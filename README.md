@@ -103,6 +103,10 @@ Returns the browser action, for example:
 | "go back" / "go forward"         | Previous / next page                |
 | "reload the page"                | Refreshes the tab                   |
 | "scroll down" / "scroll up"      | Scrolls the current page            |
+| "volume up" / "volume down"      | Turns the playing video/audio up/down |
+| "set volume to half"             | Sets volume to 50%                  |
+| "volume 30 percent"              | Sets volume to 30%                  |
+| "mute" / "unmute"                | Mutes / unmutes the tab             |
 | "close the tab"                  | Closes the current tab              |
 | "new tab"                        | Opens a new blank tab               |
 | anything else                    | Falls back to a Google search       |
