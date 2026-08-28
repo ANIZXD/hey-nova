@@ -109,6 +109,7 @@ Returns the browser action, for example:
 | "mute" / "unmute"                | Mutes / unmutes the tab             |
 | "close the tab"                  | Closes the current tab              |
 | "close youtube"                  | Closes the YouTube tab(s)           |
+| "close the browser"              | Closes the whole browser (all windows) |
 | "new tab"                        | Opens a new blank tab               |
 | "pause the video"                | Pauses the playing video/audio     |
 | "play the video" / "resume"      | Resumes it                          |

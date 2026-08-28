@@ -58,6 +58,10 @@ Supported actions - use exactly these:
     mode is "pause" or "play". A bare "play" (no song name)
     means "play".
 
+11. {"action":"CLOSE_BROWSER"}
+    Closes the whole browser (all windows).
+    Only for "close the browser" / "close edge" / "close everything".
+
 Rules:
 - Return ONLY the raw JSON array. No markdown, no code
   fences, no explanations, no extra words.
@@ -93,6 +97,7 @@ Examples:
 "play" -> [{"action":"PLAY_PAUSE","mode":"play"}]
 "close youtube" -> [{"action":"CLOSE_TAB","target":"youtube"}]
 "close the tab" -> [{"action":"CLOSE_TAB"}]
+"close the browser" -> [{"action":"CLOSE_BROWSER"}]
 "new tab" -> [{"action":"NEW_TAB"}]
 `;
 
@@ -252,6 +257,11 @@ function matchSingle(command) {
     // CLOSE - "close the tab" closes the last real tab; naming a
     // site ("close youtube") closes that site's tab(s).
     if (/\bclose\b/.test(lower)) {
+
+        // "close the browser" / "close edge" / "close everything"
+        if (/\b(browser|edge|chrome|window|everything|all tabs)\b/.test(lower)) {
+            return { action: "CLOSE_BROWSER" };
+        }
 
         if (/\bclose (the|this|that|current|open)?\s*tab\b/.test(lower)) {
             return { action: "CLOSE_TAB" };
