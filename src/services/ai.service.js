@@ -42,6 +42,15 @@ Supported actions - use exactly these:
    Scrolls the current page. direction is "up" or "down".
    "down" is the default.
 
+9. {"action":"VOLUME","mode":"up"}
+   Controls the video/audio playing in the current tab
+   (YouTube, Spotify web, etc.).
+   mode is one of: "up", "down", "set", "mute", "unmute".
+   For "set", include "value" between 0 and 1
+   ("half" -> 0.5, "max"/"full" -> 1, "30 percent" -> 0.3).
+   For "up"/"down", "step" is optional (0.1 default;
+   0.5 for "by half").
+
 Rules:
 - Return ONLY the raw JSON array. No markdown, no code
   fences, no explanations, no extra words.
@@ -67,6 +76,11 @@ Examples:
 "go forward" -> [{"action":"GO_FORWARD"}]
 "reload the page" -> [{"action":"RELOAD"}]
 "scroll down" -> [{"action":"SCROLL","direction":"down"}]
+"volume up" -> [{"action":"VOLUME","mode":"up"}]
+"decrease volume by half" -> [{"action":"VOLUME","mode":"down","step":0.5}]
+"set volume to 30 percent" -> [{"action":"VOLUME","mode":"set","value":0.3}]
+"maximize the volume" -> [{"action":"VOLUME","mode":"set","value":1}]
+"mute the tab" -> [{"action":"VOLUME","mode":"mute"}]
 "close the tab" -> [{"action":"CLOSE_TAB"}]
 "new tab" -> [{"action":"NEW_TAB"}]
 `;
@@ -230,6 +244,56 @@ function matchSingle(command) {
     if (/\bscroll\b/.test(lower)) {
         const direction = /\bup\b/.test(lower) ? "up" : "down";
         return { action: "SCROLL", direction };
+    }
+
+    // VOLUME - control the video/audio playing in the current tab
+    if (
+        /\bvolume\b/.test(lower) ||
+        /\b(louder|quieter)\b/.test(lower) ||
+        /\bmute\b/.test(lower)
+    ) {
+
+        if (/\bmute\b/.test(lower) && !/\bunmute\b/.test(lower)) {
+            return { action: "VOLUME", mode: "mute" };
+        }
+
+        if (/\bunmute\b/.test(lower)) {
+            return { action: "VOLUME", mode: "unmute" };
+        }
+
+        const up =
+            /\b(up|increase|raise|louder|higher|boost)\b/.test(lower);
+
+        const down =
+            /\b(down|decrease|reduce|lower|quieter|hush)\b/.test(lower);
+
+        const step =
+            /\bby (half|50)\b/.test(lower) ? 0.5 : 0.1;
+
+        const pct =
+            lower.match(/(\d{1,3})\s*(?:%|percent)/) ||
+            lower.match(/\bvolume\s+(?:to |at )?(\d{1,3})\b/);
+
+        if (pct) {
+            return {
+                action: "VOLUME", mode: "set",
+                value: Math.max(0, Math.min(1, Number(pct[1]) / 100))
+            };
+        }
+
+        if (/\b(max|maximum|full)\b/.test(lower)) {
+            return { action: "VOLUME", mode: "set", value: 1 };
+        }
+
+        if (/\bhalf\b/.test(lower) && !/\bby half\b/.test(lower)) {
+            return { action: "VOLUME", mode: "set", value: 0.5 };
+        }
+
+        if (up) return { action: "VOLUME", mode: "up", step };
+
+        if (down) return { action: "VOLUME", mode: "down", step };
+
+        return { action: "VOLUME", mode: "up", step: 0.1 };
     }
 
     // YouTube first (play/playlist/watch on youtube)
