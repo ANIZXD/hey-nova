@@ -1,0 +1,23 @@
+{
+  "name": "hey-nova-server",
+  "version": "2.0.0",
+  "description": "Backend for Hey Nova, a browser voice assistant. Converts any spoken command into a browser action using AI.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "voice",
+    "assistant",
+    "browser",
+    "openai"
+  ],
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}
