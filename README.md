@@ -121,9 +121,9 @@ Returns the browser action, for example:
 
 **Chain mode:** after any "hey nova <command>", Nova keeps listening
 for ~15 seconds — say "next", "pause", "mute bairan", "scroll down"
-etc. without repeating the wake word. It auto-ends on silence of
-speak "stop"/"done". Only real action words are accepted during the
-chain, so idle chatter never triggers actions.
+etc. without repeating the wake word. It auto-ends after ~15 seconds
+of silence, or say "stop". Only real action words are accepted during
+the chain, so idle chatter never triggers actions.
 
 If the backend is not running, the extension still handles common commands
 (youtube, google, chatgpt, search, ...) locally.
