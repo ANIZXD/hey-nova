@@ -1,0 +1,50 @@
+<svg viewBox="0 0 420 220" role="img" aria-label="Nova owl eyes">
+
+    <defs>
+        <radialGradient id="iris" cx="50%" cy="45%" r="65%">
+            <stop offset="0%" stop-color="#ffee88" />
+            <stop offset="45%" stop-color="#ffc73a" />
+            <stop offset="80%" stop-color="#ff9a1f" />
+            <stop offset="100%" stop-color="#c95e00" />
+        </radialGradient>
+        <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffb84d" stop-opacity="0.5" />
+            <stop offset="60%" stop-color="#ff8a00" stop-opacity="0.18" />
+            <stop offset="100%" stop-color="#ff8a00" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="socket" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#000000" />
+            <stop offset="100%" stop-color="#141414" />
+        </linearGradient>
+        <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+    </defs>
+
+    <ellipse cx="210" cy="112" rx="150" ry="80" fill="url(#eyeGlow)" />
+
+    <g>
+        <path d="M 148 114 C 168 95, 202 95, 213 110 C 197 126, 164 127, 148 114 Z"
+              fill="url(#socket)" stroke="#2a2a2a" stroke-width="1" />
+        <path d="M 144 105 C 166 88, 200 90, 216 101 L 214 105 C 198 94, 172 95, 147 109 Z"
+              fill="#0b0b0b" />
+        <circle cx="182" cy="111" r="17" fill="url(#iris)" filter="url(#softGlow)" />
+        <circle cx="182" cy="111" r="8.5" fill="#0a0a0a" />
+        <circle cx="177" cy="105" r="3.2" fill="#ffffff" fill-opacity="0.85" />
+    </g>
+
+    <g>
+        <path d="M 272 114 C 256 127, 223 126, 207 110 C 218 95, 252 95, 272 114 Z"
+              fill="url(#socket)" stroke="#2a2a2a" stroke-width="1" />
+        <path d="M 276 109 C 248 95, 222 94, 204 101 L 206 105 C 222 95, 248 88, 273 105 Z"
+              fill="#0b0b0b" />
+        <circle cx="238" cy="111" r="17" fill="url(#iris)" filter="url(#softGlow)" />
+        <circle cx="238" cy="111" r="8.5" fill="#0a0a0a" />
+        <circle cx="243" cy="105" r="3.2" fill="#ffffff" fill-opacity="0.85" />
+    </g>
+
+</svg>

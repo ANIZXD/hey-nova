@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Popup screenshot wrapper</title>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #18181d;
+        }
+        .stage {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            box-sizing: border-box;
+            background:
+                radial-gradient(500px 300px at 50% 0%, rgba(255, 170, 60, 0.1), transparent 60%),
+                #18181d;
+        }
+        iframe {
+            width: 280px;
+            height: 360px;
+            border: none;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+        }
+    </style>
+</head>
+<body>
+    <div class="stage">
+        <iframe src="../popup.html" title="popup preview"></iframe>
+    </div>
+</body>
+</html>

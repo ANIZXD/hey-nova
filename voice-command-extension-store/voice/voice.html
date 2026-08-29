@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>Hey Nova - Voice Assistant</title>
+
+    <link rel="stylesheet" href="voice.css">
+
+</head>
+
+<body>
+
+    <div class="assistant">
+
+        <div class="eagle-eyes">
+
+            <svg viewBox="0 0 420 220" role="img" aria-label="Nova eagle eyes">
+
+                <defs>
+
+                    <!-- Iris gradient: bright gold center, deep amber rim -->
+                    <radialGradient id="iris" cx="50%" cy="45%" r="65%">
+                        <stop offset="0%" stop-color="#ffee88" />
+                        <stop offset="45%" stop-color="#ffc73a" />
+                        <stop offset="80%" stop-color="#ff9a1f" />
+                        <stop offset="100%" stop-color="#c95e00" />
+                    </radialGradient>
+
+                    <!-- Aura glow -->
+                    <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#ffb84d" stop-opacity="0.5" />
+                        <stop offset="55%" stop-color="#ff8a00" stop-opacity="0.18" />
+                        <stop offset="100%" stop-color="#ff8a00" stop-opacity="0" />
+                    </radialGradient>
+
+                    <!-- Socket depth -->
+                    <linearGradient id="socket" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#000000" />
+                        <stop offset="100%" stop-color="#141414" />
+                    </linearGradient>
+
+                    <!-- Brow -->
+                    <linearGradient id="browGrad" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#ffd27a" />
+                        <stop offset="100%" stop-color="#b35c00" />
+                    </linearGradient>
+
+                    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+                        <feGaussianBlur stdDeviation="5" result="blur" />
+                        <feMerge>
+                            <feMergeNode in="blur" />
+                            <feMergeNode in="SourceGraphic" />
+                        </feMerge>
+                    </filter>
+
+                </defs>
+
+                <!-- smoky amber aura -->
+                <ellipse cx="210" cy="106" rx="160" ry="74" fill="url(#eyeGlow)" />
+
+                <!-- dark plume shading down toward the beak (no head, just shadow) -->
+                <path d="M 198 88 C 205 106 210 124 210 142 C 210 124 215 106 222 88 Z"
+                      fill="#000000" opacity="0.6" filter="url(#softGlow)" />
+
+                <!-- ================= LEFT EYE ================= -->
+                <g>
+                    <!-- fierce almond socket, outer corner higher (eagle slant) -->
+                    <path d="M 130 96 C 146 78 178 82 206 104 C 200 124 172 128 144 116 C 138 112 132 104 130 96 Z"
+                          fill="url(#socket)" stroke="#22222a" stroke-width="1.2" />
+
+                    <!-- amber iris -->
+                    <circle cx="170" cy="105" r="17" fill="url(#iris)" filter="url(#softGlow)" />
+
+                    <!-- black pupil -->
+                    <circle cx="170" cy="105" r="8.5" fill="#0a0a0a" />
+
+                    <!-- glassy highlight -->
+                    <circle cx="163" cy="99" r="3.4" fill="#ffffff" fill-opacity="0.85" />
+
+                    <!-- sweeping gold brow -->
+                    <path d="M 116 84 L 168 112 L 170 120 C 152 110 138 106 124 92 Z"
+                          fill="url(#browGrad)" stroke="#7a4400" stroke-width="1" />
+
+                    <!-- feather streaks fanning off the brow -->
+                    <path d="M 106 92 C 120 106 138 112 156 114" fill="none"
+                          stroke="#6b3a00" stroke-width="2.5" opacity="0.7" />
+                    <path d="M 116 83 C 128 93 142 100 156 104" fill="none"
+                          stroke="#6b3a00" stroke-width="2.5" opacity="0.7" />
+                </g>
+
+                <!-- ================= RIGHT EYE ================= -->
+                <g>
+                    <path d="M 290 96 C 274 78 242 82 214 104 C 220 124 248 128 276 116 C 282 112 288 104 290 96 Z"
+                          fill="url(#socket)" stroke="#22222a" stroke-width="1.2" />
+
+                    <circle cx="250" cy="105" r="17" fill="url(#iris)" filter="url(#softGlow)" />
+
+                    <circle cx="250" cy="105" r="8.5" fill="#0a0a0a" />
+
+                    <circle cx="257" cy="99" r="3.4" fill="#ffffff" fill-opacity="0.85" />
+
+                    <path d="M 304 84 L 252 112 L 250 120 C 268 110 282 106 296 92 Z"
+                          fill="url(#browGrad)" stroke="#7a4400" stroke-width="1" />
+
+                    <path d="M 314 92 C 300 106 282 112 264 114" fill="none"
+                          stroke="#6b3a00" stroke-width="2.5" opacity="0.7" />
+                    <path d="M 304 83 C 292 93 278 100 264 104" fill="none"
+                          stroke="#6b3a00" stroke-width="2.5" opacity="0.7" />
+                </g>
+
+            </svg>
+
+        </div>
+
+        <h1>Hey <span>Nova</span></h1>
+
+        <p id="status">
+            Click Start and speak
+        </p>
+
+        <div id="aiStatus" class="ai-chip ai-off">
+            Checking AI server...
+        </div>
+
+        <div class="controls">
+
+            <button id="startBtn">
+                <span class="mic">◉</span> Start Listening
+            </button>
+
+            <button id="stopBtn">
+                <span class="mic">■</span> Stop
+            </button>
+
+        </div>
+
+        <div class="panel">
+
+            <div class="panel-head">
+                <span class="dot"></span> You said
+            </div>
+
+            <p id="text">
+                Nothing yet...
+            </p>
+
+        </div>
+
+        <div class="panel">
+
+            <div class="panel-head">
+                <span class="dot amber"></span> Nova is doing
+            </div>
+
+            <p id="result">
+                Waiting for a command...
+            </p>
+
+        </div>
+
+        <div class="panel help">
+
+            <div class="panel-head">
+                <span class="dot amber"></span> Try saying
+            </div>
+
+            <div class="chips">
+                <span class="chip">Hey Nova, open YouTube</span>
+                <span class="chip">Hey Nova, search for cats</span>
+                <span class="chip">Hey Nova, play a song</span>
+                <span class="chip">Hey Nova, pause the video</span>
+                <span class="chip">Hey Nova, volume up</span>
+                <span class="chip">Hey Nova, set volume to half</span>
+                <span class="chip">Hey Nova, scroll down</span>
+                <span class="chip">Hey Nova, new tab</span>
+                <span class="chip">Hey Nova, close YouTube</span>
+                <span class="chip">Hey Nova, open reels</span>
+                <span class="chip">Hey Nova, stop</span>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="voice.js"></script>
+
+</body>
+
+</html>
