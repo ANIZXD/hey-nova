@@ -1,9 +1,9 @@
 # Hey Nova — Store listing pack
 
 Everything you paste into the Chrome Web Store / Edge Add-ons dashboard.
-Upload the zipped `voice-command-extension-store` folder; this folder is
+Upload the zipped `eagle` folder; this folder is
 the "publish build" — your personal dev copy in
-`../voice-command-extension` is intentionally untouched.
+`../owl` is intentionally untouched.
 
 ## 1. Store summary (20–60 chars)
 
@@ -134,7 +134,7 @@ Copy-paste to anyone running the extension who wants the AI upgrade.
 
 ## 8. Upload checklist
 
-- [ ] Zip `voice-command-extension-store` → upload to
+- [ ] Zip `eagle` → upload to
       Chrome Web Store (one-time $5) and/or Edge Add-ons (free)
 - [ ] Paste summary / description / permissions (above)
 - [ ] Screenshots from `screenshots/`

@@ -749,6 +749,13 @@ async function executeCommand(command) {
 
     const message = messages.join(". ");
 
+    // Nothing was actually said or done (silent-ignore case) - stay
+    // quiet and keep the mic listening so the user can say something
+    // else right away.
+    if (!message || !message.trim()) {
+        return;
+    }
+
     result.textContent = message;
 
     speak(message);
@@ -836,6 +843,16 @@ async function executeSingle(command) {
         }
 
         return { ok: false, message: "Unsupported action" };
+    }
+
+    // STEP 1.5 - If the local resolver didn't understand the command
+    // AND there's no search intent, do NOT involve the backend and do
+    // NOT speak any feedback. Stay silent and keep listening so the
+    // user can just say something again. (A misheard "cale marco"
+    // shouldn't get searched, and the mic shouldn't get stuck while
+    // the backend tries to figure it out.)
+    if (!hasSearchIntent(command)) {
+        return { ok: true, message: "" };
     }
 
     // STEP 2 - AI backend, but ONLY when the AI server is actually
@@ -1344,6 +1361,24 @@ function parseSearchTarget(input) {
 }
 
 
+// Returns true when the command clearly asks to search the web:
+// a question word (what / when / how / who / whose / where / why)
+// or an explicit search verb ("search / look up / find / google /
+// use / using"). Used to decide whether an unrecognized command is
+// worth sending to the backend at all.
+function hasSearchIntent(command) {
+
+    const trimmed = String(command).trim().toLowerCase();
+
+    return (
+        QUESTION_STARTERS.some((re) => re.test(trimmed)) ||
+        SEARCH_PREFIXES.some((p) => trimmed.startsWith(p)) ||
+        /^google\s+/i.test(trimmed) ||
+        /^(use|using)\s+/i.test(trimmed)
+    );
+}
+
+
 function resolveLocally(command) {
 
     const lower = " " + String(command).toLowerCase().trim() + " ";
@@ -1545,8 +1580,10 @@ function resolveLocally(command) {
 
     // CALL - "nova call gooner" (or "call my friend") -> open
     // the DM with that person and start a voice call.
+    // The regex also accepts common mishearings of "call" (cale,
+    // kall, kale, coal, caul) so a misheard command still calls.
     const callMatch = trimmed.match(
-        /^(?:call|voice call|call up)\s+(.+)$/i
+        /^(?:call|cale|kall|kale|coal|caul|voice call|call up|voice cale|cale up)\s+(.+)$/i
     );
 
     if (callMatch) {
@@ -1822,6 +1859,14 @@ function runAction(action) {
             }
 
             break;
+
+
+        case "ALERT":
+
+            // "Didn't understand" - just speak the message,
+            // no browser action. Return true so the message
+            // is reported and spoken as feedback.
+            return true;
 
 
         case "CALL_DM":
@@ -2545,9 +2590,12 @@ function sendDm(action) {
 
     const message = action.message || "";
 
-    // Runs inside the page. Types `text` into the message box and
-    // presses Enter via React's own key handler so the send register.
-    const sendFunc = (text) => {
+    // Runs inside the page. Types `text` into the message box (ONLY
+    // on the first call, when shouldType is true) and sends it using
+    // Discord's REAL React handlers. On retries (shouldType=false) it
+    // never re-types - it just tries again to send what's already in
+    // the box, so we never get a duplicated "hello hello hello".
+    const sendFunc = (text, shouldType) => {
 
         const setNative = (el, value) => {
             const proto =
@@ -2568,6 +2616,59 @@ function sendDm(action) {
             el.dispatchEvent(new Event("change", { bubbles: true }));
         };
 
+        // Walk React's fiber tree from `node` and invoke the FIRST real
+        // handler matching any name in `wanted` (e.g. ["onClick"] or
+        // ["onKeyDown"]). React ignores synthetic (untrusted) events,
+        // so we call the actual registered handler directly. Returns
+        // true if a handler was found and invoked.
+        const fireReact = (node, wanted) => {
+            if (!node) {
+                return false;
+            }
+            const key = Object.keys(node).find(
+                (k) => k.startsWith("__reactFiber$")
+            );
+            if (!key) {
+                return false;
+            }
+            let fiber = node[key];
+            const seen = new Set();
+            while (fiber && !seen.has(fiber)) {
+                seen.add(fiber);
+                const p = fiber.memoizedProps || {};
+                for (const name of wanted) {
+                    if (typeof p[name] === "function") {
+                        try {
+                            p[name]({
+                                key: "Enter",
+                                keyCode: 13,
+                                which: 13,
+                                code: "Enter",
+                                shiftKey: false,
+                                ctrlKey: false,
+                                altKey: false,
+                                metaKey: false,
+                                isComposing: false,
+                                preventDefault() {},
+                                stopPropagation() {},
+                                target: node,
+                                currentTarget: node,
+                                button: 0,
+                                detail: 1,
+                                clientX: 0,
+                                clientY: 0,
+                                nativeEvent: { isTrusted: true },
+                                isTrusted: true
+                            });
+                            return true;
+                        } catch (e) { /* keep walking */ }
+                    }
+                }
+                fiber = fiber.return;
+            }
+            return false;
+        };
+
         // Find the message input (Discord: div[role=textbox];
         // Instagram: div[role=textbox] inside the composer).
         const findBox = () =>
@@ -2578,79 +2679,243 @@ function sendDm(action) {
             );
 
         const box = findBox();
-        if (!box) return "no-box";
+        if (!box) {
+            console.log("[Nova send] no message box found");
+            return "no-box";
+        }
+        console.log("[Nova send] box found (shouldType=" + shouldType + "), text=" + JSON.stringify(text));
 
-        setNative(box, text);
+        // Only type on the very first attempt. On retries the text is
+        // already in the box - re-typing would duplicate it into
+        // "hello hello hello" and can't be easily undone.
+        let committed = false;
+        if (shouldType) {
 
-        // Press Enter through React's fiber onKeyDown handler so the
-        // send actually fires (untrusted key events are ignored).
-        let sent = false;
-        const key = Object.keys(box).find(
-            (k) => k.startsWith("__reactFiber$")
-        );
-        if (key) {
-            let fiber = box[key];
-            const seen = new Set();
-            while (fiber && !seen.has(fiber)) {
-                seen.add(fiber);
-                const p = fiber.memoizedProps || {};
-                if (typeof p.onKeyDown === "function") {
-                    try {
-                        p.onKeyDown({
-                            key: "Enter",
-                            keyCode: 13,
-                            which: 13,
-                            shiftKey: false,
-                            ctrlKey: false,
-                            altKey: false,
-                            metaKey: false,
-                            preventDefault() {},
-                            stopPropagation() {},
-                            target: box,
-                            currentTarget: box,
-                            nativeEvent: { isTrusted: true },
-                            isTrusted: true
-                        });
-                        sent = true;
-                    } catch (e) { /* ignore */ }
-                    break;
-                }
-                fiber = fiber.return;
+            box.focus();
+
+            // Properly insert the text so Discord's editor STATE updates -
+            // not just the visible text. Directly setting .textContent /
+            // .value leaves the app model (Slate) unaware, so the Send
+            // button stays disabled and Enter has nothing to send.
+            // document.execCommand("insertText") commits to the model.
+            try {
+                document.execCommand("insertText", false, text);
+                box.dispatchEvent(
+                    new InputEvent("input", {
+                        bubbles: true,
+                        inputType: "insertText",
+                        data: text
+                    })
+                );
+                committed = true;
+                console.log("[Nova send] text inserted via execCommand");
+            } catch (e) {
+                setNative(box, text);
+                console.log("[Nova send] execCommand failed, used setNative: " + e.message);
             }
+        } else {
+            console.log("[Nova send] skipping type (already typed)");
         }
 
-        return sent ? "sent" : "typed";
+        // Find Discord's Send button. Modern Discord has NO aria-label
+        // on it (the icon SVG is aria-hidden), so scan the composer for
+        // the active submit-capable button: visible, enabled, with a
+        // real React onClick. Anchoring on the textbox avoids clicking
+        // unrelated toolbar buttons.
+        const findSendButton = () => {
+            const boxAncestors = [];
+            let cur = box.parentElement;
+            for (let i = 0; cur && i < 6; i++, cur = cur.parentElement) {
+                boxAncestors.push(cur);
+            }
+            const scope = boxAncestors[boxAncestors.length - 1] || document;
+
+            const candidates = [
+                ...scope.querySelectorAll("button[type='submit']"),
+                ...scope.querySelectorAll(
+                    'button[aria-label="Send message"], ' +
+                    'button[aria-label*="send"], ' +
+                    'button[data-testid*="send"]'
+                )
+            ];
+
+            for (const b of candidates) {
+                if (typeof b.disabled === "boolean" && b.disabled) continue;
+                const r = b.getBoundingClientRect();
+                if (!r || r.width === 0 || r.height === 0) continue;
+                if (rangeOverlaps(box, b)) {
+                    console.log("[Nova send] chose candidate button", describeBtn(b));
+                    return b;
+                }
+            }
+
+            // Fallback: Discord's send button is the RIGHTMOST button
+            // in the composer, to the right of the textbox (the emoji /
+            // attachment buttons are to the LEFT/above the box, so they
+            // won't match). Pick the rightmost enabled React button.
+            const all = scope.querySelectorAll("button");
+            let best = null;
+            for (const b of all) {
+                if (typeof b.disabled === "boolean" && b.disabled) continue;
+                if (b === box) continue;
+                if (!Object.keys(b).some((k) => k.startsWith("__reactFiber$"))) continue;
+                const r = b.getBoundingClientRect();
+                if (!r || r.width === 0 || r.height === 0) continue;
+                if (r.left < boxRect(box).left - 5) continue; // must be right of the box
+                if (!best || r.left > best.left) best = b;
+            }
+            if (best) {
+                console.log("[Nova send] chose rightmost button", describeBtn(best));
+            } else {
+                console.log("[Nova send] NO send button found in composer");
+            }
+            return best;
+        };
+
+        // Returns the bounding rect of the message box (so findSendButton
+        // can tell the send button apart from left-side emoji/attach).
+        const boxRect = (node) => {
+            const r = node.getBoundingClientRect();
+            return {
+                left: r ? r.left : 0,
+                right: r ? r.right : 0
+            };
+        };
+
+        // Short, readable description of a button for the console logs.
+        const describeBtn = (b) => {
+            return {
+                tag: b.tagName,
+                type: b.getAttribute("type"),
+                disabled: b.disabled,
+                label: b.getAttribute("aria-label") || b.getAttribute("title") || "",
+                cls: String(b.className || "").slice(0, 40)
+            };
+        };
+
+        // True when element `a` and `b` are close together on screen
+        // (the send button sits inside the composer right by the box).
+        const rangeOverlaps = (a, b) => {
+            const ra = a.getBoundingClientRect();
+            const rb = b.getBoundingClientRect();
+            if (!ra || !rb) return true;
+            return !(
+                ra.right < rb.left - 10 ||
+                rb.right < ra.left - 10 ||
+                ra.bottom < rb.top - 10 ||
+                rb.bottom < ra.top - 10
+            );
+        };
+
+        // 1) Press Enter through the box's REAL onKeyDown handler.
+        //    Discord's editor commits + sends on Enter, and this is the
+        //    most reliable send path. Always try it (box already has
+        //    text in the send phase, and having typed text here too).
+        if (fireReact(box, ["onKeyDown"])) {
+            console.log("[Nova send] fired box onKeyDown Enter -> SENT");
+            return "sent";
+        }
+
+        // 2) Click the real Send button via its real onClick (the
+        //    button enables once the model has text).
+        const sendBtn = findSendButton();
+        if (sendBtn && fireReact(sendBtn, ["onClick", "onMouseDown"])) {
+            console.log("[Nova send] fired send button onClick -> SENT");
+            return "sent";
+        }
+        console.log(
+            "[Nova send] send button " +
+            (sendBtn ? "found but onClick not invoked" : "not found") +
+            "; committed=" + committed
+        );
+
+        // 3) Last resort: dispatch a synthetic Enter keydown. (React
+        //    usually ignores this, but a contenteditable still shows
+        //    the text and some builds pick it up.)
+        box.dispatchEvent(
+            new KeyboardEvent("keydown", {
+                key: "Enter",
+                code: "Enter",
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true
+            })
+        );
+
+        console.log("[Nova send] typed only (no send fired)");
+        return "typed";
     };
 
-    const trySend = (tabId, left) => {
-        if (left <= 0) {
+    // Tries to send. `typed` is false until the message has been
+    // entered once - after that we NEVER re-type, we only re-attempt
+    // the send. Stops after a few quiet retries so it never spams
+    // "hello hello hello" and never loops forever.
+    // Sends the DM. Two phases, so a slow-loading Discord DM page
+    // never races the send:
+    //   find -> look for the text box (long wait allowed); once found,
+    //           type ONCE and move on.
+    //   send -> click the real Send button a few quiet times. NEVER
+    //           re-types, so it can't stack "hello hello hello".
+    const sendMessage = (tabId) => {
+        if (tabId == null) {
+            console.log("[Nova send] no tab id");
             return;
         }
-        chrome.scripting.executeScript(
-            {
-                target: { tabId },
-                func: sendFunc,
-                args: [message]
-            },
-            (res) => {
-                const r =
-                    res && res[0] && res[0].result
-                        ? res[0].result
-                        : "no-box";
-                if (r === "sent") {
-                    // done
-                    return;
+        let phase = "find";
+        let typedOnce = false;
+        let findTries = 0;
+        let sendTries = 0;
+        const MAX_FIND = 20;  // ~20s to wait for the DM page to load
+        const MAX_SEND = 6;   // a few extra send clicks after typing
+
+        const step = () => {
+            chrome.scripting.executeScript(
+                {
+                    target: { tabId },
+                    func: sendFunc,
+                    args: [message, !typedOnce]
+                },
+                (res) => {
+                    const r =
+                        res && res[0] && res[0].result
+                            ? res[0].result
+                            : "no-box";
+                    console.log("[Nova send] phase=" + phase +
+                        " typedOnce=" + typedOnce + " result=" + r);
+                    if (r === "sent") {
+                        return;
+                    }
+                    if (phase === "find") {
+                        if (r !== "no-box") {
+                            typedOnce = true;
+                            phase = "send";
+                            sendTries = 0;
+                        } else {
+                            findTries++;
+                            if (findTries > MAX_FIND) {
+                                console.log("[Nova send] GAVE UP - box never appeared");
+                                return;
+                            }
+                            setTimeout(step, 1000);
+                            return;
+                        }
+                    }
+                    // phase === "send": text is in the box. Just re-click
+                    // the send button - never re-type.
+                    if (phase === "send") {
+                        sendTries++;
+                        if (sendTries > MAX_SEND) {
+                            console.log("[Nova send] GAVE UP - typed but not sent");
+                            return;
+                        }
+                        setTimeout(step, 700);
+                        return;
+                    }
                 }
-                if (r === "typed") {
-                    // Typed but couldn't press Enter - give the box a
-                    // beat and retry returning "typed" is good enough.
-                    window.setTimeout(() => {}, 0);
-                    return;
-                }
-                // no-box: page still loading - retry shortly.
-                setTimeout(() => trySend(tabId, left - 1), 900);
-            }
-        );
+            );
+        };
+        step();
     };
 
     // Open (or reuse) the Discord/Instagram DM thread, then send.
@@ -2668,7 +2933,7 @@ function sendDm(action) {
             }
             chrome.tabs.update(tab.id, { url: dmUrl, active: true }, () => {
                 // Wait for the DM and message box to load.
-                setTimeout(() => trySend(tab.id, 12), 2500);
+                setTimeout(() => sendMessage(tab.id), 2500);
             });
         };
 
@@ -2676,7 +2941,7 @@ function sendDm(action) {
             go(tabToUse);
         } else {
             chrome.tabs.create({ url: dmUrl }, (tab) => {
-                setTimeout(() => trySend(tab && tab.id, 12), 3000);
+                setTimeout(() => sendMessage((tab && tab.id) || null), 3000);
             });
         }
     });
@@ -3269,6 +3534,22 @@ function localFallback(command) {
         }
     }
 
+    // Only search for a real search intent: an explicit
+    // "search / look up / find / google" prefix, or a natural
+    // question word (what / when / how / who / whose / where / why).
+    // Anything else is not understood - never default to a search
+    // (a misheard "cale marco" should NOT become a web search).
+    const isSearchIntent =
+        usedPrefix ||
+        /^google\s+/i.test(lower.trim()) ||
+        QUESTION_STARTERS.some((re) => re.test(lower.trim()));
+
+    if (!isSearchIntent) {
+        // Stay silent and just keep listening so the user can speak
+        // again - no feedback, no backend, no search.
+        return;
+    }
+
     searchWeb(searchText, target);
 }
 
@@ -3321,6 +3602,10 @@ function describeAction(action) {
                     " for " + action.query
                 );
             }
+
+        case "ALERT":
+
+            return action.message || "Didn't understand";
 
         case "CALL_DM":
 
