@@ -5,6 +5,8 @@ Upload the zipped `eagle` folder; this folder is
 the "publish build" — your personal dev copy in
 `../owl` is intentionally untouched.
 
+Current published build: **v2.2.0**
+
 ## 1. Store summary (20–60 chars)
 
 > Hands-free voice control for your browser
@@ -18,6 +20,17 @@ the "publish build" — your personal dev copy in
 > **"close the tab"**, **"scroll down"**, **"go back"**, or even
 > **"nova call <friend>"** for a Discord voice call — Nova hears the
 > wake word and does it.
+>
+> **New in v2.2.0:**
+> - **Always-on wake word in the background** — say "Hey Nova" even
+>   when the assistant tab isn't open and Nova wakes up and listens.
+> - **Save sites by voice** — "save this site as school" then
+>   "open school" anytime.
+> - **Discord contacts** — add multiple contacts with a Discord ID
+>   ("save jane as my discord id 123..."), DM or call any of them,
+>   and pick a default.
+> - **Window control** — "minimize", "maximize", "fullscreen",
+>   "snap left / right", and "previous tab".
 >
 > **Works instantly, no accounts, no cloud.** Every common command is
 > resolved 100% locally inside the extension — your audio and your
@@ -42,7 +55,15 @@ the "publish build" — your personal dev copy in
 > - "Hey Nova, volume up"
 > - "Hey Nova, set volume to half"
 > - "Hey Nova, go back"
+> - "Hey Nova, previous tab"
 > - "Hey Nova, new tab"
+> - "Hey Nova, minimize the browser"
+> - "Hey Nova, open in fullscreen"
+> - "Hey Nova, save this site as school"
+> - "Hey Nova, open school"
+> - "Hey Nova, save jane as my discord id 555123456"
+> - "Hey Nova, dm jane hey whats up"
+> - "Hey Nova, call jane"
 > - "Hey Nova, what is the weather in London" (with AI)
 > - "Hey Nova, call gooner" (with AI targets configured)
 
@@ -55,8 +76,11 @@ the "publish build" — your personal dev copy in
 
 | Permission                             | Why it's needed                                            |
 | -------------------------------------- | ---------------------------------------------------------- |
-| `tabs`                                 | Open / close / navigate / reload the user's tabs on command |
+| `tabs`                                 | Open / close / navigate / act on the user's tabs on command |
 | `scripting`                            | Scroll the page and send navigation keys (YouTube Shorts)  |
+| `windows`                              | Minimize / maximize / fullscreen / snap window on command  |
+| `offscreen`                            | Run the always-on background wake-word listener            |
+| `storage`                              | Save the user's sites and Discord contacts by voice        |
 | `<all_urls>` (host)                    | Run those actions on whichever site the user is viewing    |
 | `http://localhost:3000/*` (host)       | Only if the user runs the optional local AI server         |
 

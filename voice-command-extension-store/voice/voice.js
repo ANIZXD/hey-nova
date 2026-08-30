@@ -59,6 +59,161 @@ let lastSpokenText = "";
 let cancelled = false;
 let sessionEndAt = 0;
 
+// Anti-churn: track how long each recognition session lasted. If it
+// keeps ending within a heartbeat of starting, we back off (and stop)
+// instead of hot-restarting "Listening" -> "Restarting" forever.
+const MIN_STABLE_MS = 1500;
+let lastRecStart = 0;
+let fastEndStreak = 0;
+let churnPaused = false;
+
+// User-saved sites: { keyword: { url, createdAt } }. Persisted in
+// chrome.storage.local so "save this site as kiss" -> "open kiss"
+// works across restarts.
+let savedSites = {};
+
+function loadSavedSites() {
+    try {
+        chrome.storage.local.get({ savedSites: {} }, (data) => {
+            savedSites = (data && data.savedSites) || {};
+        });
+    } catch (e) {
+        console.log("[Nova saved] load failed: " + e.message);
+    }
+}
+
+function persistSavedSites() {
+    try {
+        chrome.storage.local.set({ savedSites });
+    } catch (e) {
+        console.log("[Nova saved] save failed: " + e.message);
+    }
+}
+
+function addSavedSite(keyword, url) {
+    const key = String(keyword || "").trim().toLowerCase();
+    if (!key) {
+        return null;
+    }
+    savedSites[key] = { url, createdAt: Date.now() };
+    persistSavedSites();
+    return key;
+}
+
+function removeSavedSite(keyword) {
+    const key = String(keyword || "").trim().toLowerCase();
+    if (key && savedSites[key]) {
+        delete savedSites[key];
+        persistSavedSites();
+        return key;
+    }
+    return null;
+}
+
+chrome.runtime.onInstalled && chrome.runtime.onInstalled.addListener(() => {
+    loadSavedSites();
+    loadSavedContacts();
+});
+loadSavedSites();
+loadSavedContacts();
+
+// User-saved Discord/IG contacts:
+//   savedContacts = { nickname: { dcId, ig, createdAt } }
+// and a default nickname used when "call/dm" has no name.
+let savedContacts = {};
+let defaultContact = null;
+
+function loadSavedContacts() {
+    try {
+        chrome.storage.local.get(
+            { savedContacts: {}, defaultContact: null },
+            (data) => {
+                savedContacts = (data && data.savedContacts) || {};
+                // Seed from the built-in lists on first run.
+                if (Object.keys(savedContacts).length === 0) {
+                    for (const name in VOICE_TARGETS) {
+                        savedContacts[name.toLowerCase()] = {
+                            dcId: VOICE_TARGETS[name],
+                            ig: INSTA_TARGETS[name] || null,
+                            createdAt: Date.now()
+                        };
+                    }
+                    persistSavedContacts();
+                }
+                defaultContact =
+                    (data && (data.defaultContact || null)) || null;
+            }
+        );
+    } catch (e) {
+        console.log("[Nova contact] load failed: " + e.message);
+    }
+}
+
+function persistSavedContacts() {
+    try {
+        chrome.storage.local.set({ savedContacts, defaultContact });
+    } catch (e) {
+        console.log("[Nova contact] save failed: " + e.message);
+    }
+}
+
+function addSavedContact(name, dcId, ig) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key) {
+        return null;
+    }
+    const prev = savedContacts[key] || {};
+    savedContacts[key] = {
+        dcId: dcId || prev.dcId || null,
+        ig: ig || prev.ig || null,
+        createdAt: prev.createdAt || Date.now()
+    };
+    persistSavedContacts();
+    return key;
+}
+
+function removeSavedContact(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (key && savedContacts[key]) {
+        delete savedContacts[key];
+        if (defaultContact === key) {
+            defaultContact = null;
+        }
+        persistSavedContacts();
+        return key;
+    }
+    return null;
+}
+
+function setDefaultContact(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (key && savedContacts[key]) {
+        defaultContact = key;
+        persistSavedContacts();
+        return key;
+    }
+    return null;
+}
+
+// Resolve a spoken name to a saved contact (or null).
+function resolveContact(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key) {
+        return null;
+    }
+    // Exact, contains, or is-contained match against saved nicknames.
+    for (const n in savedContacts) {
+        if (
+            key === n ||
+            n.includes(key) ||
+            key.includes(n)
+        ) {
+            return { name: n, dcId: savedContacts[n].dcId || null, ig: savedContacts[n].ig || null };
+        }
+    }
+    return null;
+}
+
 const recognition = new SpeechRecognition();
 
 recognition.continuous = true;
@@ -97,6 +252,22 @@ stopBtn.addEventListener("click", () => {
 
 });
 
+// The offscreen wake-word listener heard "Nova". Bring this page back
+// to life and start listening (same as pressing Start), because having
+// this tab focused again revives the mic.
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === "nova-wake-now") {
+        if (assistantRunning) {
+            stopAssistant();
+        }
+        assistantRunning = true;
+        cancelled = false;
+        status.textContent =
+            "🟢 Listening for Hey Nova...";
+        startRecognition();
+    }
+});
+
 
 // ======================================
 // START RECOGNITION
@@ -117,6 +288,8 @@ function startRecognition() {
         recognition.start();
 
         recognitionRunning = true;
+
+        lastRecStart = Date.now();
 
         status.textContent =
             "🟢 Listening for Hey Nova...";
@@ -152,6 +325,14 @@ function scheduleRestart() {
 
     clearTimeout(restartTimer);
 
+    // If this tab is hidden (user is on another tab) the browser pauses
+    // the mic anyway. Don't churn between "Restarting" and "Listening" -
+    // wait quietly here until the tab is focused again, then resume.
+    if (document.visibilityState === "hidden") {
+        status.textContent = "🔵 In background - say Nova";
+        return;
+    }
+
     restartTimer = setTimeout(() => {
 
         if (assistantRunning) {
@@ -168,6 +349,15 @@ function scheduleRestart() {
 
     }, 120);
 }
+
+// Resume listening the moment this tab is brought back into view.
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        if (assistantRunning && !recognitionRunning) {
+            startRecognition();
+        }
+    }
+});
 
 
 // ======================================
@@ -491,12 +681,38 @@ recognition.onend = () => {
         return;
     }
 
+    // A session that survived long enough is healthy - reset the churn
+    // counter and restart normally.
+    if (Date.now() - lastRecStart >= MIN_STABLE_MS) {
+        fastEndStreak = 0;
+        churnPaused = false;
+        status.textContent = "🟡 Restarting...";
+        scheduleRestart();
+        return;
+    }
+
+    // Ended within a heartbeat of starting = the mic/speech engine can't
+    // hold a session. Back off, then stop churning "Listening"/"Restarting".
+    fastEndStreak++;
+    const delays = [400, 1000, 2000, 3000, 5000];
+    const delay = delays[Math.min(fastEndStreak - 1, delays.length - 1)];
+
+    if (fastEndStreak >= 8 || churnPaused) {
+        churnPaused = true;
+        status.textContent =
+            "🔴 Mic keeps dropping - check permissions & restart";
+        clearTimeout(restartTimer);
+        return;
+    }
 
     status.textContent =
-        "🟡 Restarting...";
-
-
-    scheduleRestart();
+        "🟡 Retrying in " + (delay / 1000) + "s...";
+    clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => {
+        if (assistantRunning) {
+            startRecognition();
+        }
+    }, delay);
 };
 
 
@@ -541,8 +757,24 @@ recognition.onerror = (event) => {
     status.textContent =
         "Error: " + event.error;
 
-    // Hard errors (not-allowed, service-not-allowed) -
-    // keep trying after a short pause.
+    if (
+        event.error === "not-allowed" ||
+        event.error === "service-not-allowed"
+    ) {
+        // Microphone blocked / not granted. Do NOT tight-loop - show a
+        // clear message and wait for the tab to regain focus (or the
+        // user to allow the mic). Retry periodically so it self-heals.
+        const retryMs = 4000;
+        clearTimeout(restartTimer);
+        restartTimer = setTimeout(() => {
+            if (assistantRunning) {
+                startRecognition();
+            }
+        }, retryMs);
+        return;
+    }
+
+    // Other hard errors - pause quietly if hidden, else retry shortly.
     scheduleRestart();
 };
 
@@ -1387,6 +1619,144 @@ function resolveLocally(command) {
     // Navigation / tab actions
     if (/\bnew tab\b/.test(lower)) return { action: "NEW_TAB" };
 
+    // WINDOW STATE - minimise / maximise / fullscreen / snap-split.
+    if (
+        /\bminimi?[sz]e\b/.test(lower) &&
+        /\b(browser|window|edge|chrome|app)\b/.test(lower)
+    ) {
+        return { action: "WINDOW_MINIMIZE" };
+    }
+
+    if (/\bfull ?screen\b/.test(lower)) {
+        return { action: "FULLSCREEN" };
+    }
+    if (
+        /(exit|leave|close|quit|off)\s+full ?screen\b/.test(lower) ||
+        /\b(exiting|leaving) full ?screen\b/.test(lower)
+    ) {
+        return { action: "EXIT_FULLSCREEN" };
+    }
+
+    if (
+        /\bmaximi[sz]e\b/.test(lower) ||
+        /\bmake (it|this) (bigger|large|big|huge)\b/.test(lower)
+    ) {
+        return { action: "WINDOW_MAXIMIZE" };
+    }
+
+    // "snap/split/put/place ... left/right" -> half-screen snap.
+    if (
+        /\b(snap|split|put|place|dock)\b/.test(lower) &&
+        /\b(left|right)\b/.test(lower)
+    ) {
+        if (/\bleft\b/.test(lower)) return { action: "SNAP_LEFT" };
+        return { action: "SNAP_RIGHT" };
+    }
+
+    // "restore / normal / back to normal / reset window".
+    if (
+        /\b(restore|reset|normal)\b/.test(lower) &&
+        /\bwindow\b/.test(lower)
+    ) {
+        return { action: "NORMAL_WINDOW" };
+    }
+
+    // SAVE / REMOVE keyword -> site.
+    // "save this site as kiss" / "save this page as kiss" /
+    // "save kiss for this site"  -> saves current tab URL as "kiss",
+    // then "open kiss" opens it later.
+    const saveAs = trimmed.match(
+        /^save\s+(?:this\s+)?(?:site|page|tab|website|webpage)?\s*as\s+([\w]+)/
+    );
+    if (saveAs && /\bsave\b/.test(lower)) {
+        return { action: "SAVE_SITE", keyword: saveAs[1] };
+    }
+    const saveFor = trimmed.match(
+        /^save\s+([\w]+)\s+for\s+(?:this|this site|this page|this tab)/
+    );
+    if (saveFor && /\bsave\b/.test(lower)) {
+        return { action: "SAVE_SITE", keyword: saveFor[1] };
+    }
+
+    // "remove/delete/forget keyword kiss"
+    const remKey = trimmed.match(
+        /^(?:remove|delete|forget|clear)\s+(?:the\s+)?(?:keyword|shortcut|alias|site)?\s+([\w]+)/
+    );
+    if (remKey) {
+        return { action: "REMOVE_SITE", keyword: remKey[1] };
+    }
+
+    // ============ CONTACT MANAGEMENT ============
+    // Change / set / add a Discord ID or IG username, set the default,
+    // or remove a contact.
+    //  - "change marco's discord id to <id>"
+    //  - "set marco's id to <id>"
+    //  - "set marco's username to <handle>"
+    //  - "save <name> as my discord id <id>"
+    //  - "add contact <name> with id <id>"
+    //  - "make <name> my default" / "set default contact <name>"
+    //  - "remove contact <name>"
+
+    const changeDiscordId = trimmed.match(
+        /^(?:change|set|update)\s+([\w']+)(?:'s)?\s+(?:discord\s+)?(?:user\s+)?id\s+(?:to\s+)?([0-9]+)/
+    );
+    if (changeDiscordId) {
+        const nm = changeDiscordId[1].toLowerCase().replace(/'/g, "");
+        const id = changeDiscordId[2];
+        return { action: "SET_CONTACT_ID", name: nm, dcId: id };
+    }
+
+    const changeIg = trimmed.match(
+        /^(?:change|set|update)\s+([\w']+)(?:'s)?\s+((?:instagram|ig)\s+)?(?:user)?name\s+(?:to\s+)?([\w._]+)/
+    );
+    if (changeIg) {
+        const nm = changeIg[1].toLowerCase().replace(/'/g, "");
+        const handle = changeIg[3].replace(/^@/, "");
+        return { action: "SET_CONTACT_IG", name: nm, ig: handle };
+    }
+
+    const saveContactAs = trimmed.match(
+        /^save\s+([\w]+)\s+as\s+(?:my\s+)?(?:discord|dc)\s+(?:user\s+)?id\s+([0-9]+)/
+    );
+    if (saveContactAs) {
+        return {
+            action: "SET_CONTACT_ID",
+            name: saveContactAs[1].toLowerCase(),
+            dcId: saveContactAs[2]
+        };
+    }
+
+    const addContact = trimmed.match(
+        /^add\s+contact\s+([\w]+)\s+(?:with\s+)?(?:id|dc\s+id|discord\s+id)\s+([0-9]+)/
+    );
+    if (addContact) {
+        return {
+            action: "SET_CONTACT_ID",
+            name: addContact[1].toLowerCase(),
+            dcId: addContact[2]
+        };
+    }
+
+    const setDefault = trimmed.match(
+        /^(?:make|set)\s+([\w]+)\s+(?:my\s+)?default(?: contact)?|^set\s+default\s+contact\s+([\w]+)/
+    );
+    if (setDefault) {
+        return {
+            action: "SET_DEFAULT_CONTACT",
+            name: (setDefault[1] || setDefault[2] || "").toLowerCase()
+        };
+    }
+
+    const removeContact = trimmed.match(
+        /^remove\s+contact\s+([\w]+)/i
+    );
+    if (removeContact) {
+        return {
+            action: "REMOVE_CONTACT",
+            name: removeContact[1].toLowerCase()
+        };
+    }
+
     // CLOSE - "close the tab" closes the CURRENT tab; "close all
     // youtube" closes every YouTube tab; "close bairan" closes that
     // song's tab by name. Generic, works for any site or app.
@@ -1454,6 +1824,16 @@ function resolveLocally(command) {
             };
         }
     }
+    // PREV_TAB - "previous tab" / "last tab" / "switch back" goes to
+    // the tab you were just on (uses the tab history order).
+    if (
+        /\b(previous|prev|last)\s*(?:one\s+)?tab\b/.test(lower) ||
+        /\bswitch\s+back\b/.test(lower) ||
+        /\bswitch\s+tabs\b/.test(lower)
+    ) {
+        return { action: "PREV_TAB" };
+    }
+
     if (/\bgo back\b/.test(lower) || /\bback(page|wards)?\b/.test(lower)) return { action: "GO_BACK" };
     if (/\bgo forward\b/.test(lower) || /\bforward\b/.test(lower)) return { action: "GO_FORWARD" };
     if (/\breload\b/.test(lower) || /\brefresh\b/.test(lower)) return { action: "RELOAD" };
@@ -1594,38 +1974,38 @@ function resolveLocally(command) {
             .trim()
             .toLowerCase();
 
-        // Default to the first/only target, or match by name.
-        let userId = null;
-        let displayName = who || "your friend";
-
+        // Resolve by name against saved contacts (includes the built-in
+        // seed list), or fall back to the default contact when no name.
         if (who) {
-            for (const name in VOICE_TARGETS) {
-                if (
-                    who === name ||
-                    who.includes(name) ||
-                    name.includes(who)
-                ) {
-                    userId = VOICE_TARGETS[name];
-                    displayName = name;
-                    break;
-                }
+            const contact = resolveContact(who);
+            if (contact && contact.dcId) {
+                return {
+                    action: "CALL_DM",
+                    userId: contact.dcId,
+                    name: contact.name
+                };
             }
+            return null;
         }
 
-        // No name given -> use the only entry.
-        if (!userId && !who) {
-            const keys = Object.keys(VOICE_TARGETS);
-            if (keys.length === 1) {
-                userId = VOICE_TARGETS[keys[0]];
-                displayName = keys[0];
-            }
-        }
-
-        if (userId) {
+        // No name given -> use the configured default contact.
+        if (defaultContact && savedContacts[defaultContact] &&
+            savedContacts[defaultContact].dcId) {
             return {
                 action: "CALL_DM",
-                userId,
-                name: displayName
+                userId: savedContacts[defaultContact].dcId,
+                name: defaultContact
+            };
+        }
+
+        // Final fallback: any single saved contact.
+        const keys = Object.keys(savedContacts);
+        const only = keys.find((k) => savedContacts[k] && savedContacts[k].dcId);
+        if (only) {
+            return {
+                action: "CALL_DM",
+                userId: savedContacts[only].dcId,
+                name: only
             };
         }
 
@@ -1667,9 +2047,8 @@ function resolveLocally(command) {
     }
 
     // DM / MESSAGE - "dm marco hey" sends a Discord DM to that person;
-    // "message marco hey" sends it on Instagram (once the person's IG
-    // @username is added to INSTA_TARGETS below; until then it falls
-    // back to Discord so it still works).
+    // "message marco hey" sends it on Instagram (if an IG handle is
+    // saved for them, else falls back to Discord).
     {
         const dmMatch = trimmed.match(/^(?:dm|direct message|msg)\s+(.+)$/i);
         const msgMatch = trimmed.match(/^(?:message|messenger)\s+(.+)$/i);
@@ -1682,34 +2061,33 @@ function resolveLocally(command) {
                 const rest = m[1].trim();
                 const parsed = rest.match(/^(\S+)(?:\s+([\s\S]+))?$/);
                 if (parsed) {
+                    const text = (parsed[2] || "").trim();
                     const aliasKey = parsed[1].toLowerCase();
-                    for (const name in VOICE_TARGETS) {
-                        if (aliasKey === name) {
-                            const text = (parsed[2] || "").trim();
 
-                            // "message" = Instagram. If no IG handle is
-                            // configured yet, fall back to Discord.
-                            let usePlatform = platform;
-                            let username = null;
-                            if (platform === "instagram") {
-                                if (INSTA_TARGETS[name]) {
-                                    username = INSTA_TARGETS[name];
-                                } else {
-                                    usePlatform = "discord";
-                                }
+                    // Resolve the named contact (saved + built-in seed).
+                    let contact = resolveContact(aliasKey);
+                    if (!contact && aliasKey) {
+                        contact = resolveContact(aliasKey.replace(/s$/, ""));
+                    }
+
+                    if (contact && (contact.dcId || contact.ig)) {
+                        let usePlatform = platform;
+                        let username = contact.ig || null;
+                        if (platform === "instagram") {
+                            if (!username) {
+                                usePlatform = "discord";
                             }
-
-                            return {
-                                action: "SEND_DM",
-                                platform: usePlatform,
-                                userId: usePlatform === "discord"
-                                    ? VOICE_TARGETS[name]
-                                    : null,
-                                username,
-                                name,
-                                message: text
-                            };
                         }
+                        return {
+                            action: "SEND_DM",
+                            platform: usePlatform,
+                            userId: usePlatform === "discord"
+                                ? contact.dcId
+                                : null,
+                            username,
+                            name: contact.name,
+                            message: text
+                        };
                     }
                 }
             }
@@ -1773,11 +2151,22 @@ function resolveLocally(command) {
     }
 
     // Alias / keyword -> OPEN_URL (when there's an open intent)
+    const openIntent =
+        /\b(open|go to|take me to|visit|launch|start|navigate to|open up|pull up|show me)\b/.test(lower);
+
+    // User-saved sites first ("open kiss").
+    for (const name in savedSites) {
+        if (openIntent &&
+            new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower)) {
+            return { action: "OPEN_URL", url: savedSites[name].url };
+        }
+    }
+
+    // Built-in aliases.
     for (const name in SITE_ALIASES) {
-        if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower)) {
-            if (/\b(open|go to|take me to|visit|launch|start|navigate to|open up|pull up|show me)\b/.test(lower)) {
-                return { action: "OPEN_URL", url: SITE_ALIASES[name] };
-            }
+        if (openIntent &&
+            new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower)) {
+            return { action: "OPEN_URL", url: SITE_ALIASES[name] };
         }
     }
 
@@ -1861,6 +2250,101 @@ function runAction(action) {
             break;
 
 
+        case "SAVE_SITE":
+
+            // Grab the active real tab (ignore the extension popup/page)
+            // and save its URL as the spoken keyword.
+            try {
+                chrome.tabs.query({}, (tabs) => {
+                    const extUrl = chrome.runtime && chrome.runtime.getURL &&
+                        chrome.runtime.getURL("");
+                    let target = null;
+                    let fallback = null;
+                    for (const t of tabs || []) {
+                        if (extUrl && t.url && t.url.indexOf(extUrl) === 0) {
+                            continue;
+                        }
+                        if (t.url && t.url.indexOf("chrome://") === 0) {
+                            continue;
+                        }
+                        if (!target || (t.active && !t.pinned)) {
+                            target = t;
+                        }
+                    }
+                    const tab = target ||
+                        (fallback || (tabs || []).filter((t) => t.url &&
+                            t.url.indexOf("chrome://") !== 0)[0]);
+                    if (tab && tab.url) {
+                        addSavedSite(action.keyword, tab.url);
+                        speak("Saved this site as " + action.keyword + ".");
+                    } else {
+                        speak("No site found to save.");
+                    }
+                });
+            } catch (e) {
+                console.log("[Nova] SAVE_SITE error: " + e.message);
+                speak("Couldn't save that site.");
+            }
+
+            return true;
+
+
+        case "REMOVE_SITE":
+
+            if (removeSavedSite(action.keyword)) {
+                speak("Removed keyword " + action.keyword + ".");
+            } else {
+                speak("No saved site called " + action.keyword + ".");
+            }
+
+            return true;
+
+
+        case "SET_CONTACT_ID":
+
+            if (addSavedContact(action.name, action.dcId, null)) {
+                speak("Set " + action.name + "'s Discord id.");
+            } else {
+                speak("Couldn't save that contact.");
+            }
+
+            return true;
+
+
+        case "SET_CONTACT_IG":
+
+            if (addSavedContact(action.name, null, action.ig)) {
+                speak("Set " + action.name + "'s Instagram to " +
+                    action.ig + ".");
+            } else {
+                speak("Couldn't save that contact.");
+            }
+
+            return true;
+
+
+        case "SET_DEFAULT_CONTACT":
+
+            if (setDefaultContact(action.name)) {
+                speak(action.name + " is now your default contact.");
+            } else {
+                speak("No contact called " + action.name + ".");
+            }
+
+            return true;
+
+
+        case "REMOVE_CONTACT":
+
+            if (removeSavedContact(action.name)) {
+                speak("Removed contact " + action.name + ".");
+            } else {
+                speak("No contact called " + action.name + ".");
+            }
+
+            return true;
+
+
         case "ALERT":
 
             // "Didn't understand" - just speak the message,
@@ -1937,11 +2421,120 @@ function runAction(action) {
             return true;
 
 
+        case "WINDOW_MINIMIZE":
+
+            currentWindowId((winId) => {
+                if (winId != null) {
+                    chrome.windows.update(winId, { state: "minimized" });
+                }
+            });
+
+            return true;
+
+
+        case "WINDOW_MAXIMIZE":
+
+            currentWindowId((winId) => {
+                if (winId != null) {
+                    chrome.windows.update(winId, { state: "maximized" });
+                }
+            });
+
+            return true;
+
+
+        case "FULLSCREEN":
+
+            currentWindowId((winId) => {
+                if (winId != null) {
+                    chrome.windows.update(winId, { state: "fullscreen" });
+                }
+            });
+
+            return true;
+
+
+        case "EXIT_FULLSCREEN":
+
+            currentWindowId((winId) => {
+                if (winId != null) {
+                    chrome.windows.update(winId, { state: "normal" });
+                }
+            });
+
+            return true;
+
+
+        case "NORMAL_WINDOW":
+
+            currentWindowId((winId) => {
+                if (winId != null) {
+                    chrome.windows.update(winId, { state: "normal" });
+                }
+            });
+
+            return true;
+
+
+        case "SNAP_LEFT":
+        case "SNAP_RIGHT":
+
+            // Snap the current window to the left or right half of the
+            // screen (Windows split-screen behaviour).
+            currentWindowId((winId) => {
+                if (winId == null) {
+                    return;
+                }
+                const half = Math.floor(screen.availWidth / 2);
+                const snapLeft = action.action === "SNAP_LEFT";
+                const bounds = {
+                    left: snapLeft ? 0 : half,
+                    top: 0,
+                    width: half,
+                    height: screen.availHeight
+                };
+                chrome.windows.update(winId, { state: "normal" }, () => {
+                    chrome.windows.update(winId, bounds);
+                });
+            });
+
+            return true;
+
+
         case "GO_BACK":
 
             runOnTargetTab(
                 (tab) =>
                     chrome.tabs.goBack(tab.id)
+            );
+
+            return true;
+
+
+        case "PREV_TAB":
+
+            // Track a per-window "last active tab" so we can jump back
+            // to it. chrome.tabs.query ordered by lastAccessed gives us
+            // history; the previous tab is the most-recently-accessed
+            // one that isn't the active tab.
+            chrome.tabs.query(
+                { currentWindow: true },
+                (tabs) => {
+                    const activeId = (tabs || []).find((t) => t.active);
+                    if (activeId) {
+                        const ordered = (tabs || [])
+                            .filter((t) => t.id !== activeId.id)
+                            .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+                        if (ordered[0]) {
+                            chrome.tabs.update(ordered[0].id, { active: true });
+                            return;
+                        }
+                    }
+                    const fallback = (tabs || []).find((t) => t.id !== activeId.id);
+                    if (fallback) {
+                        chrome.tabs.update(fallback.id, { active: true });
+                    }
+                }
             );
 
             return true;
@@ -3342,6 +3935,34 @@ function runOnTargetTab(callback) {
 }
 
 
+// Resolve the id of the window the user is currently looking at, then
+// call the callback. Used for window state commands (minimise/maximise/
+// fullscreen/snap) that act on the whole window.
+function currentWindowId(callback) {
+    chrome.windows.getCurrent({}, (win) => {
+        if (
+            win &&
+            win.id != null &&
+            win.id !== chrome.windows.WINDOW_ID_NONE
+        ) {
+            callback(win.id);
+        } else {
+            chrome.tabs.query(
+                { active: true, currentWindow: true },
+                (tabs) => {
+                    const t = tabs && tabs[0];
+                    if (t && t.windowId != null) {
+                        callback(t.windowId);
+                    } else {
+                        callback(null);
+                    }
+                }
+            );
+        }
+    });
+}
+
+
 // Close the tab(s) for a named site, song, or the current tab.
 // action.target = SITE_ALIASES key, action.url = domain,
 // action.title = song/app name found in a tab title/URL,
@@ -3624,6 +4245,30 @@ function describeAction(action) {
                 (action.name || "your friend")
             );
 
+        case "SAVE_SITE":
+
+            return "Saving this site as " + action.keyword;
+
+        case "REMOVE_SITE":
+
+            return "Removing keyword " + action.keyword;
+
+        case "SET_CONTACT_ID":
+
+            return "Changing " + action.name + "'s Discord id";
+
+        case "SET_CONTACT_IG":
+
+            return "Changing " + action.name + "'s Instagram";
+
+        case "SET_DEFAULT_CONTACT":
+
+            return "Setting default contact to " + action.name;
+
+        case "REMOVE_CONTACT":
+
+            return "Removing contact " + action.name;
+
         case "PLAY":
 
             return "Playing " + action.query;
@@ -3651,6 +4296,27 @@ function describeAction(action) {
         case "CLOSE_BROWSER":
             return "Closing the browser";
 
+        case "WINDOW_MINIMIZE":
+            return "Minimising the browser";
+
+        case "WINDOW_MAXIMIZE":
+            return "Maximising the browser";
+
+        case "FULLSCREEN":
+            return "Going fullscreen";
+
+        case "EXIT_FULLSCREEN":
+            return "Leaving fullscreen";
+
+        case "NORMAL_WINDOW":
+            return "Restoring the window";
+
+        case "SNAP_LEFT":
+            return "Snapping to the left";
+
+        case "SNAP_RIGHT":
+            return "Snapping to the right";
+
         case "PLAY_PAUSE":
             return action.mode === "pause"
                 ? "Pausing the video"
@@ -3658,6 +4324,9 @@ function describeAction(action) {
 
         case "GO_BACK":
             return "Going back";
+
+        case "PREV_TAB":
+            return "Going to the previous tab";
 
         case "GO_FORWARD":
             return "Going forward";
